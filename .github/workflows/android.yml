@@ -1,0 +1,106 @@
+name: Android (arm64-v8a)
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager "platforms;android-36" "build-tools;36.1.0"
+
+      - name: Set up Android NDK r27d
+        run: |
+          NDK_URL="https://dl.google.com/android/repository/android-ndk-r27d-linux.zip"
+          wget -nv "$NDK_URL" -O /tmp/ndk.zip
+          sudo unzip -q /tmp/ndk.zip -d /usr/local/lib/android/ndk
+          rm /tmp/ndk.zip
+          echo "ANDROID_NDK_HOME=/usr/local/lib/android/ndk/android-ndk-r27d" >> "$GITHUB_ENV"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make gcc m4 libncurses-dev autoconf texinfo g++
+
+      - name: Derive version code
+        id: version
+        run: |
+          VERSION=$(grep 'AC_INIT' configure.ac | sed -n 's/.*\[\([0-9.]*\)\].*/\1/p')
+          echo "Emacs version from configure.ac: $VERSION"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+          VERSION_CODE=$(printf "%d%02d%02d00%d" "$MAJOR" "$MINOR" "$PATCH" 3)
+          echo "version_name=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "Derived versionCode: $VERSION_CODE"
+
+      - name: Set version code in AndroidManifest
+        run: |
+          sed -i 's/android:versionCode="[^"]*"/android:versionCode="${{ steps.version.outputs.version_code }}"/' \
+            java/AndroidManifest.xml.in
+
+      - name: Download Android prebuilt dependencies
+        run: |
+          mkdir -p emacs_deps
+          cd emacs_deps
+          bash ../admin/download-android-deps.sh 64
+
+      - name: Build terminfo
+        run: |
+          pushd etc/e
+          tic -o ../ ./eterm-color.ti
+          popd
+
+      - name: Build Emacs
+        run: |
+          ./autogen.sh
+          export deps="$(pwd)/emacs_deps"
+          export SDK="$ANDROID_SDK_ROOT"
+          ./configure \
+            --with-android="$SDK/platforms/android-36/android.jar" \
+            --without-android-debug \
+            --with-gif \
+            --with-gnutls \
+            --with-harfbuzz \
+            --with-jpeg \
+            --with-native-compilation=no \
+            --with-ndk-path="$(cat "$deps/search-path.txt")" \
+            --with-png \
+            --with-selinux \
+            --with-sqlite3 \
+            --with-tiff \
+            --with-tree-sitter \
+            --with-webp \
+            --with-xml2 \
+            ANDROID_CC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android22-clang" \
+            SDK_BUILD_TOOLS="$SDK/build-tools/36.1.0" \
+            || (cat config.log; false)
+          make all
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: emacs-${{ steps.version.outputs.version_name }}-arm64-v8a
+          path: java/emacs-*.apk
+          if-no-files-found: error
