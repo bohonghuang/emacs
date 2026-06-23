@@ -117,6 +117,8 @@ download_tarball "libffi-3.4.5-emacs.tar.gz" "libffi-3.4.5" \
 
 rm -rf sqlite
 git clone https://android.googlesource.com/platform/external/sqlite -b android-7.1.2_r39
+sed -i '/LOCAL_CFLAGS += \$(minimal_sqlite_flags)/a\LOCAL_EXPORT_C_INCLUDES += \$(LOCAL_PATH)' sqlite/dist/Android.mk
+sed -i 's/^# define HAVE_POSIX_FALLOCATE 1$/\/\* # define HAVE_POSIX_FALLOCATE 1 \*\//' sqlite/dist/sqlite3.c
 ndk_path="$ndk_path $PWD/sqlite/dist"
 rm -rf pcre
 git clone https://android.googlesource.com/platform/external/pcre -b android-7.1.2_r39
