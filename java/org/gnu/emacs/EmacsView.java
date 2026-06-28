@@ -844,7 +844,6 @@ public final class EmacsView extends ViewGroup
 
     /* Set a reasonable inputType.  */
     info.inputType = InputType.TYPE_CLASS_TEXT;
-
     /* If this fails or ANDROID_IC_MODE_NULL was requested, then don't
        initialize the input connection.  */
 

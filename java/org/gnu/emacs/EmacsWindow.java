@@ -58,6 +58,8 @@ import android.util.SparseArray;
 import android.util.Log;
 
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 
 /* This defines a window, which is a handle.  Windows represent a
@@ -130,6 +132,21 @@ public final class EmacsWindow extends EmacsHandleObject
   /* The button state and keyboard modifier mask at the time of the
      last button press or release event.  */
   public int lastButtonState;
+
+  /* Previous hat switch axis values and active DPAD key, for
+     converting game controller hat input to KEYCODE_DPAD_*.  */
+  private float prevHatX, prevHatY;
+  private int prevHatDpadKeyCode;
+
+  /* Handler for hat switch key repeat, and the posted runnable.
+     The initial delay (keyRepeatDelay, ~300ms) starts when the hat
+     enters a direction; subsequent repeats fire at keyRepeatTimeout
+     (~50ms), matching native Android key repeat timing.  Cancelled
+     when the hat returns to center.  */
+  private static final int HAT_REPEAT_DELAY    = 300; /* ms */
+  private static final int HAT_REPEAT_INTERVAL = 50;  /* ms */
+  private Handler hatRepeatHandler;
+  private Runnable hatRepeatRunnable;
 
   /* Whether or not the window is mapped.  */
   private volatile boolean isMapped;
@@ -1303,6 +1320,121 @@ public final class EmacsWindow extends EmacsHandleObject
     return false;
   }
 
+
+
+  /* Convert AXIS_HAT_X/AXIS_HAT_Y game controller input to
+     KEYCODE_DPAD_* key press/release events with auto-repeat.
+     On first entry into a direction, send a key press and start a
+     delayed repeat timer (HAT_REPEAT_DELAY, ~300ms).  Each repeat
+     fire sends release-then-press; subsequent fires are spaced at
+     HAT_REPEAT_INTERVAL (~50ms).  When the hat centers, release the
+     key and cancel the timer.  This mimics native Android key repeat
+     timing for held hardware keys.  */
+
+  private void
+  handleHatSwitch (MotionEvent event)
+  {
+    float hatX, hatY;
+    int dpadKeyCode;
+
+    hatX = event.getAxisValue (MotionEvent.AXIS_HAT_X);
+    hatY = event.getAxisValue (MotionEvent.AXIS_HAT_Y);
+
+    if (hatX != 0.0f || hatY != 0.0f)
+      {
+	if (Math.abs (hatX) > Math.abs (hatY))
+	  dpadKeyCode = (hatX < 0.0f
+			 ? KeyEvent.KEYCODE_DPAD_LEFT
+			 : KeyEvent.KEYCODE_DPAD_RIGHT);
+	else
+	  dpadKeyCode = (hatY < 0.0f
+			 ? KeyEvent.KEYCODE_DPAD_UP
+			 : KeyEvent.KEYCODE_DPAD_DOWN);
+
+	if (dpadKeyCode != prevHatDpadKeyCode)
+	  {
+	    /* Direction changed (or first press): cancel any
+	       pending repeat, release old key if any, press new.  */
+	    cancelHatRepeat ();
+
+	    if (prevHatDpadKeyCode != 0)
+	      EmacsNative.sendKeyRelease (this.handle,
+					  event.getEventTime (),
+					  motionEventModifiers (event),
+					  prevHatDpadKeyCode, 0);
+
+	    EmacsNative.sendKeyPress (this.handle,
+				      event.getEventTime (),
+				      motionEventModifiers (event),
+				      dpadKeyCode, 0);
+	    prevHatDpadKeyCode = dpadKeyCode;
+
+	    startHatRepeat (event);
+	  }
+      }
+    else if (prevHatDpadKeyCode != 0)
+      {
+	/* Hat centered: cancel repeat and release.  */
+	cancelHatRepeat ();
+
+	EmacsNative.sendKeyRelease (this.handle,
+				    event.getEventTime (),
+				    motionEventModifiers (event),
+				    prevHatDpadKeyCode, 0);
+	prevHatDpadKeyCode = 0;
+      }
+
+    prevHatX = hatX;
+    prevHatY = hatY;
+  }
+
+
+  /* Start the auto-repeat timer for the current hat direction.
+     The first repeat fires after HAT_REPEAT_DELAY; subsequent
+     fires are at HAT_REPEAT_INTERVAL.  Each fire sends a
+     release-then-press pair for the active DPAD key.  */
+
+  private void
+  startHatRepeat (final MotionEvent event)
+  {
+    if (hatRepeatHandler == null)
+      hatRepeatHandler = new Handler (Looper.getMainLooper ());
+
+    hatRepeatRunnable = new Runnable ()
+      {
+	@Override
+	public void
+	run ()
+	{
+	  EmacsNative.sendKeyRelease (EmacsWindow.this.handle,
+				      event.getEventTime (),
+				      motionEventModifiers (event),
+				      prevHatDpadKeyCode, 0);
+	  EmacsNative.sendKeyPress (EmacsWindow.this.handle,
+				    event.getEventTime (),
+				    motionEventModifiers (event),
+				    prevHatDpadKeyCode, 0);
+	  hatRepeatHandler.postDelayed (this, HAT_REPEAT_INTERVAL);
+	}
+      };
+
+    hatRepeatHandler.postDelayed (hatRepeatRunnable, HAT_REPEAT_DELAY);
+  }
+
+
+  /* Cancel any pending hat repeat timer.  Safe to call when no
+     timer is active.  */
+
+  private void
+  cancelHatRepeat ()
+  {
+    if (hatRepeatHandler != null && hatRepeatRunnable != null)
+      {
+	hatRepeatHandler.removeCallbacks (hatRepeatRunnable);
+	hatRepeatRunnable = null;
+      }
+  }
+
   public boolean
   onGenericMotionEvent (MotionEvent event)
   {
@@ -1315,6 +1447,7 @@ public final class EmacsWindow extends EmacsHandleObject
 	return true;
 
       case MotionEvent.ACTION_HOVER_MOVE:
+	handleHatSwitch (event);
 	EmacsNative.sendMotionNotify (this.handle, (int) event.getX (),
 				      (int) event.getY (),
 				      event.getEventTime ());
@@ -1338,8 +1471,8 @@ public final class EmacsWindow extends EmacsHandleObject
       case MotionEvent.ACTION_POINTER_DOWN:
       case MotionEvent.ACTION_UP:
       case MotionEvent.ACTION_POINTER_UP:
-      case MotionEvent.ACTION_CANCEL:
       case MotionEvent.ACTION_MOVE:
+	handleHatSwitch (event);
 	/* MotionEvents may either be sent to onGenericMotionEvent or
 	   onTouchEvent depending on if Android thinks it is a mouse
 	   event or not, but we detect them ourselves.  */
