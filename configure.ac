@@ -2607,16 +2607,18 @@ with Android support])
 for Android, but all API calls need to be stubbed out])
 
     # Now set any shared user ID that was specified.
-    AS_IF([test -n "$with_shared_user_id"],
+    # Default to com.termux if none given (and not explicitly disabled).
+    AS_IF([test "x$with_shared_user_id" = "xno"],
+      [],
+      [test -n "$with_shared_user_id"],
       [emacs_val=$with_shared_user_id
        emacs_val=`AS_ECHO(["$with_shared_user_id"]) \
                   | sed -e 's/"/\\"/'`
        emacs_val="\"$emacs_val\""
-       ANDROID_SHARED_USER_ID="android:sharedUserId=$emacs_val"
-       # `android:sharedUserName' is required for sharedUserID to work
-       # on recent Android releases.  It does not otherwise affect the
-       # behavior of any code.
-       emacs_val="\"@string/shared_user_name\""
+       ANDROID_SHARED_USER_ID="android:sharedUserId=$emacs_val"],
+      [ANDROID_SHARED_USER_ID="android:sharedUserId=\"com.termux\""])
+    AS_IF([test -n "$ANDROID_SHARED_USER_ID"],
+      [emacs_val="\"@string/shared_user_name\""
        ANDROID_SHARED_USER_NAME="android:sharedUserLabel=$emacs_val"])],[
     # Emacs will be built as a shared library, and a wrapper around it
     # will also be built for the benefit of applications.  This

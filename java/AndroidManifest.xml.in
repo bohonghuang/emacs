@@ -33,7 +33,7 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>. -->
 	  android:appCategory="productivity"
 	  @ANDROID_SHARED_USER_ID@
 	  @ANDROID_SHARED_USER_NAME@
-	  android:versionCode="30"
+	  android:versionCode="@ANDROID_VERSION_CODE@"
 	  android:versionName="@version@">
 
   <!-- Paste in every permission in existence so Emacs can do

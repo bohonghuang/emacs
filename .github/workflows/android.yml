@@ -42,23 +42,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y make gcc m4 libncurses-dev autoconf texinfo g++
 
-      - name: Derive version code
+      - name: Get Emacs version
         id: version
         run: |
           VERSION=$(grep 'AC_INIT' configure.ac | sed -n 's/.*\[\([0-9.]*\)\].*/\1/p')
           echo "Emacs version from configure.ac: $VERSION"
-          MAJOR=$(echo "$VERSION" | cut -d. -f1)
-          MINOR=$(echo "$VERSION" | cut -d. -f2)
-          PATCH=$(echo "$VERSION" | cut -d. -f3)
-          VERSION_CODE=$(printf "%d%02d%02d00%d" "$MAJOR" "$MINOR" "$PATCH" 3)
           echo "version_name=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
-          echo "Derived versionCode: $VERSION_CODE"
 
-      - name: Set version code in AndroidManifest
-        run: |
-          sed -i 's/android:versionCode="[^"]*"/android:versionCode="${{ steps.version.outputs.version_code }}"/' \
-            java/AndroidManifest.xml.in
 
       - name: Download Android prebuilt dependencies
         run: |
